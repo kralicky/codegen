@@ -6,7 +6,6 @@ require (
 	github.com/iancoleman/strcase v0.3.0
 	github.com/olebedev/when v1.0.0
 	github.com/prometheus/common v0.53.0
-	github.com/samber/lo v1.39.0
 	github.com/spf13/cobra v1.8.0
 	github.com/spf13/pflag v1.0.5
 	golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842

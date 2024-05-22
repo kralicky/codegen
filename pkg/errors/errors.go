@@ -1,4 +1,4 @@
-package storage
+package errors
 
 import (
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
