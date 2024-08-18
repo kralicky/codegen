@@ -1,15 +1,16 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
-	"os"
+	"io"
 
+	"github.com/bufbuild/protoyaml-go"
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/proto"
-	"sigs.k8s.io/yaml"
 )
 
 type Writer interface {
@@ -32,15 +33,6 @@ type TextRenderer interface {
 func RenderOutput(cmd *cobra.Command, response proto.Message) {
 	outputFormat, _ := cmd.Flags().GetString("output")
 	outWriter := cmd.OutOrStdout()
-	if outputFormat == "auto" {
-		if file, ok := outWriter.(*os.File); ok {
-			if term.IsTerminal(int(file.Fd())) {
-				outputFormat = "text"
-			} else {
-				outputFormat = "json"
-			}
-		}
-	}
 
 	switch outputFormat {
 	case "json":
@@ -50,7 +42,7 @@ func RenderOutput(cmd *cobra.Command, response proto.Message) {
 			Multiline: true,
 		}.Format(response))
 	case "yaml":
-		out, err := yaml.Marshal(response)
+		out, err := protoyaml.MarshalOptions{Indent: 2}.Marshal(response)
 		if err != nil {
 			cmd.PrintErrln(err)
 			return
@@ -69,6 +61,22 @@ func RenderOutput(cmd *cobra.Command, response proto.Message) {
 	}
 }
 
+func RenderStreamingOutput[T proto.Message, S interface {
+	Recv() (T, error)
+	grpc.ClientStream
+}](cmd *cobra.Command, stream S) error {
+	for {
+		msg, err := stream.Recv()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
+		RenderOutput(cmd, msg)
+	}
+}
+
 func AddOutputFlag(cmd *cobra.Command) {
-	cmd.PersistentFlags().StringP("output", "o", "auto", "Output format (json[,multiline]|yaml|text|auto)")
+	cmd.PersistentFlags().StringP("output", "o", "yaml", "Output format (json[,multiline]|yaml|text)")
 }

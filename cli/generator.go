@@ -28,25 +28,28 @@ import (
 var Generator = NewGenerator()
 
 func NewGenerator() *generator {
-	return &generator{
-		allFlagSets:    make(map[string]*flagSet),
-		generatedFiles: make(map[string]*protogen.GeneratedFile),
-	}
+	return &generator{}
 }
 
-type generator struct {
+type generator struct{}
+
+type pluginContext struct {
 	plugin          *protogen.Plugin
 	allFlagSets     map[string]*flagSet
 	orderedFlagSets []*flagSet
 	generatedFiles  map[string]*protogen.GeneratedFile
 }
 
-func (cg generator) Name() string {
+func (generator) Name() string {
 	return "cli"
 }
 
-func (cg *generator) Generate(gen *protogen.Plugin) error {
-	cg.plugin = gen
+func (generator) Generate(gen *protogen.Plugin) error {
+	pc := pluginContext{
+		plugin:         gen,
+		allFlagSets:    make(map[string]*flagSet),
+		generatedFiles: make(map[string]*protogen.GeneratedFile),
+	}
 
 	toGenerate := []*protogen.File{}
 	for _, file := range gen.Files {
@@ -67,13 +70,13 @@ func (cg *generator) Generate(gen *protogen.Plugin) error {
 	})
 
 	for _, file := range toGenerate {
-		cg.generatedFiles[file.Desc.Path()] = gen.NewGeneratedFile(file.GeneratedFilenamePrefix+"_cli.pb.go", file.GoImportPath)
+		pc.generatedFiles[file.Desc.Path()] = gen.NewGeneratedFile(file.GeneratedFilenamePrefix+"_cli.pb.go", file.GoImportPath)
 	}
 	for _, file := range toGenerate {
-		cg.generateFileContents(gen, file, cg.generatedFiles[file.Desc.Path()])
+		pc.generateFileContents(file, pc.generatedFiles[file.Desc.Path()])
 	}
 
-	for _, fs := range cg.orderedFlagSets {
+	for _, fs := range pc.orderedFlagSets {
 		if fs.flagCount == 0 {
 			continue
 		}
@@ -129,7 +132,7 @@ func genLeadingComments(g *protogen.GeneratedFile, loc protoreflect.SourceLocati
 	}
 }
 
-func (cg *generator) generateFileContents(_ *protogen.Plugin, file *protogen.File, g *protogen.GeneratedFile) {
+func (pc *pluginContext) generateFileContents(file *protogen.File, g *protogen.GeneratedFile) {
 	opts := GeneratorOptions{}
 	applyOptions(file.Desc, &opts)
 
@@ -149,7 +152,7 @@ func (cg *generator) generateFileContents(_ *protogen.Plugin, file *protogen.Fil
 	g.P()
 
 	anyServices := len(file.Services) > 0
-	cg.generateServices(&opts, file, g)
+	pc.generateServices(&opts, file, g)
 	if !anyServices || (opts.GenerateFlagsForAllMessages && len(file.Messages) > 0) {
 		g.Skip()
 	}
@@ -157,15 +160,15 @@ func (cg *generator) generateFileContents(_ *protogen.Plugin, file *protogen.Fil
 	if opts.GenerateFlagsForAllMessages {
 		for _, msg := range file.Messages {
 			// check if a flagset has already been generated for this message
-			if _, ok := cg.allFlagSets[msg.GoIdent.String()]; ok {
+			if _, ok := pc.allFlagSets[msg.GoIdent.String()]; ok {
 				continue
 			}
-			cg.generateFlagSet(g, msg)
+			pc.generateFlagSet(g, msg)
 		}
 	}
 
 	if opts.GenerateDeepcopy {
-		cg.generateDeepcopyFunctions(file, g)
+		pc.generateDeepcopyFunctions(file, g)
 	}
 }
 
@@ -173,7 +176,7 @@ func cmdBuilderMethodName(method *protogen.Method) string {
 	return fmt.Sprintf("Build%s%sCmd", method.Parent.GoName, method.GoName)
 }
 
-func (cg *generator) generateServices(opts *GeneratorOptions, file *protogen.File, g *protogen.GeneratedFile) {
+func (pc *pluginContext) generateServices(opts *GeneratorOptions, file *protogen.File, g *protogen.GeneratedFile) {
 	svcCtx := serviceGenWriters{}
 	switch opts.ClientDependencyInjection {
 	case ClientDependencyInjectionStrategy_InjectIntoContext:
@@ -189,7 +192,7 @@ func (cg *generator) generateServices(opts *GeneratorOptions, file *protogen.Fil
 				}
 				g.P(_cliutil.Ident("AddSubcommands"), "(cmd, append([]*", _cobra.Ident("Command"), "{")
 				for _, method := range methods {
-					if cg.shouldSkipMethod(method) {
+					if pc.shouldSkipMethod(method) {
 						continue
 					}
 					g.P(cmdBuilderMethodName(method), "(),")
@@ -220,7 +223,7 @@ func (cg *generator) generateServices(opts *GeneratorOptions, file *protogen.Fil
 				}
 				g.P(_cliutil.Ident("AddSubcommands"), "(cmd, append([]*", _cobra.Ident("Command"), "{")
 				for _, method := range methods {
-					if cg.shouldSkipMethod(method) {
+					if pc.shouldSkipMethod(method) {
 						continue
 					}
 					g.P(cmdBuilderMethodName(method), "(client),")
@@ -235,19 +238,19 @@ func (cg *generator) generateServices(opts *GeneratorOptions, file *protogen.Fil
 	}
 	g.P()
 	for _, service := range file.Services {
-		cg.generateServiceTopLevelCmd(service, g, svcCtx)
+		pc.generateServiceTopLevelCmd(service, g, svcCtx)
 		g.P()
 		for _, method := range service.Methods {
-			if cg.shouldSkipMethod(method) {
+			if pc.shouldSkipMethod(method) {
 				continue
 			}
-			cg.generateMethodCmd(service, method, g, svcCtx)
+			pc.generateMethodCmd(service, method, g, svcCtx)
 			g.P()
 		}
 	}
 }
 
-func (cg *generator) shouldSkipMethod(method *protogen.Method) bool {
+func (pc *pluginContext) shouldSkipMethod(method *protogen.Method) bool {
 	opts := CommandOptions{
 		Use: strcase.ToKebab(method.GoName),
 	}
@@ -256,8 +259,8 @@ func (cg *generator) shouldSkipMethod(method *protogen.Method) bool {
 		return true
 	}
 
-	// todo: streaming methods are not implemented yet
-	if method.Desc.IsStreamingClient() || method.Desc.IsStreamingServer() {
+	// todo: client streaming methods are not implemented yet
+	if method.Desc.IsStreamingClient() {
 		return true
 	}
 	return false
@@ -299,7 +302,7 @@ func generateContextInjectionFunctions(file *protogen.File, g *protogen.Generate
 	}
 }
 
-func (cg *generator) generateServiceTopLevelCmd(service *protogen.Service, g *protogen.GeneratedFile, writers serviceGenWriters) error {
+func (pc *pluginContext) generateServiceTopLevelCmd(service *protogen.Service, g *protogen.GeneratedFile, writers serviceGenWriters) error {
 	leadingComments, err := formatComments(service.Comments)
 	if err != nil {
 		return err
@@ -364,7 +367,7 @@ func (cg *generator) generateServiceTopLevelCmd(service *protogen.Service, g *pr
 	return nil
 }
 
-func (cg *generator) generateMethodCmd(service *protogen.Service, method *protogen.Method, g *protogen.GeneratedFile, writers serviceGenWriters) error {
+func (pc *pluginContext) generateMethodCmd(service *protogen.Service, method *protogen.Method, g *protogen.GeneratedFile, writers serviceGenWriters) error {
 	opts := CommandOptions{
 		Use: strcase.ToKebab(method.GoName),
 	}
@@ -459,13 +462,13 @@ func (cg *generator) generateMethodCmd(service *protogen.Service, method *protog
 	g.P(" Args: cobra.NoArgs,")
 	g.P(" ValidArgsFunction: cobra.NoFileCompletions,")
 
-	cg.generateRun(service, method, g, writers)
+	pc.generateRun(service, method, g, writers)
 
 	g.P("}")
 
 	// Generate flags for input fields recursively
 	if !isEmpty {
-		flagSet, err := cg.generateFlagSet(g, method.Input)
+		flagSet, err := pc.generateFlagSet(g, method.Input)
 		if err != nil {
 			return err
 		}
@@ -473,7 +476,7 @@ func (cg *generator) generateMethodCmd(service *protogen.Service, method *protog
 		case EditScope_EditFields:
 			if flagSet.flagCount > 0 {
 				g.P("cmd.Flags().AddFlagSet(in.FlagSet())")
-				cg.generateFlagCompletionFuncs(g, flagSet)
+				pc.generateFlagCompletionFuncs(g, flagSet)
 			}
 		case EditScope_EditMessage:
 			g.P(`cmd.Flags().StringP("file", "f", "", "path to a file containing the config, or - to read from stdin")`)
@@ -605,8 +608,8 @@ func (b *buffer) QualifiedGoIdent(ident protogen.GoIdent) string {
 	return b.g.QualifiedGoIdent(ident)
 }
 
-func (cg *generator) generateFlagSet(g *protogen.GeneratedFile, message *protogen.Message) (*flagSet, error) {
-	if existing, ok := cg.allFlagSets[message.GoIdent.String()]; ok {
+func (pc *pluginContext) generateFlagSet(g *protogen.GeneratedFile, message *protogen.Message) (*flagSet, error) {
+	if existing, ok := pc.allFlagSets[message.GoIdent.String()]; ok {
 		return existing, nil
 	}
 
@@ -616,10 +619,10 @@ func (cg *generator) generateFlagSet(g *protogen.GeneratedFile, message *protoge
 		deps:     deps,
 	}
 
-	cg.allFlagSets[message.GoIdent.String()] = fs
-	cg.orderedFlagSets = append(cg.orderedFlagSets, fs)
+	pc.allFlagSets[message.GoIdent.String()] = fs
+	pc.orderedFlagSets = append(pc.orderedFlagSets, fs)
 
-	if dest, ok := cg.generatedFiles[message.Desc.ParentFile().Path()]; ok {
+	if dest, ok := pc.generatedFiles[message.Desc.ParentFile().Path()]; ok {
 		fs.buf = &buffer{g: dest}
 	} else {
 		fs.buf = &buffer{g: g}
@@ -657,10 +660,10 @@ func (cg *generator) generateFlagSet(g *protogen.GeneratedFile, message *protoge
 				isMsg := field.Desc.Kind() == protoreflect.MessageKind && !field.Desc.IsList() && !field.Desc.IsMap()
 				if isMsg {
 					_, isCustom := customFieldGenerators[string(field.Message.Desc.FullName())]
-					shouldGenerateFlagSet := (field.Message.Desc.ParentFile() == field.Parent.Desc.ParentFile() && field.Message != message) || cg.generatedFiles[field.Message.Desc.ParentFile().Path()] != nil
+					shouldGenerateFlagSet := (field.Message.Desc.ParentFile() == field.Parent.Desc.ParentFile() && field.Message != message) || pc.generatedFiles[field.Message.Desc.ParentFile().Path()] != nil
 					if !isCustom && shouldGenerateFlagSet {
 						// ensure skipped fields are still redacted if they need to be
-						depFs, err := cg.generateFlagSet(g.g, field.Message)
+						depFs, err := pc.generateFlagSet(g.g, field.Message)
 						if err != nil {
 							return nil, err
 						}
@@ -858,10 +861,10 @@ func (cg *generator) generateFlagSet(g *protogen.GeneratedFile, message *protoge
 					// generate a flag set if either:
 					// - the field is from a *different* message in the same file
 					//   (note that this effectively always skips recursive message fields)
-					// - the file is in cg.generatedFiles (special case, see generateFlagSet)
+					// - the file is in pc.generatedFiles (special case, see generateFlagSet)
 					if (field.Message.Desc.ParentFile() == field.Parent.Desc.ParentFile() && field.Message != message) ||
-						cg.generatedFiles[field.Message.Desc.ParentFile().Path()] != nil {
-						depFs, err := cg.generateFlagSet(g.g, field.Message)
+						pc.generatedFiles[field.Message.Desc.ParentFile().Path()] != nil {
+						depFs, err := pc.generateFlagSet(g.g, field.Message)
 						if err != nil {
 							return nil, err
 						}
@@ -963,13 +966,13 @@ func (cg *generator) generateFlagSet(g *protogen.GeneratedFile, message *protoge
 		g.P("return fs")
 		g.P("}")
 
-		cg.genSecretMethods(g, fs)
+		pc.genSecretMethods(g, fs)
 	}
 
 	return fs, nil
 }
 
-func (cg *generator) genSecretMethods(g *buffer, fs *flagSet) {
+func (pc *pluginContext) genSecretMethods(g *buffer, fs *flagSet) {
 	if len(fs.secretFields) == 0 && len(fs.depsWithSecretFields) == 0 {
 		return
 	}
@@ -1053,7 +1056,7 @@ func (cg *generator) genSecretMethods(g *buffer, fs *flagSet) {
 	g.P("}")
 }
 
-func (cg *generator) generateDeepcopyFunctions(file *protogen.File, g *protogen.GeneratedFile) {
+func (pc *pluginContext) generateDeepcopyFunctions(file *protogen.File, g *protogen.GeneratedFile) {
 	for _, msg := range file.Messages {
 		g.P()
 		g.P("func (in *", msg.GoIdent, ") DeepCopyInto(out *", msg.GoIdent, ") {")
@@ -1068,7 +1071,7 @@ func (cg *generator) generateDeepcopyFunctions(file *protogen.File, g *protogen.
 }
 
 // generate converters from the proto type to the standard struct type and back
-func (cg *generator) generateConverterFunctions(file *protogen.File, g *protogen.GeneratedFile) {
+func (pc *pluginContext) generateConverterFunctions(file *protogen.File, g *protogen.GeneratedFile) {
 	for _, msg := range file.Messages {
 		g.P()
 		g.P("func (in *", msg.GoIdent, ") ToSourceType() *", msg.GoIdent, " {")
@@ -1118,7 +1121,7 @@ var customFieldGenerators = map[string]func(g *buffer, field *protogen.Field, de
 	},
 }
 
-func (cg *generator) generateFlagCompletionFuncs(g *protogen.GeneratedFile, fs *flagSet, prefix ...string) {
+func (pc *pluginContext) generateFlagCompletionFuncs(g *protogen.GeneratedFile, fs *flagSet, prefix ...string) {
 	for _, comp := range fs.flagCompletionFuncs {
 		flagName := strings.Join(append(prefix, comp.name), ".")
 		g.P(`cmd.RegisterFlagCompletionFunc("`, flagName, `", func(cmd *`, _cobra.Ident("Command"), `, args []string, toComplete string) ([]string, `, _cobra.Ident("ShellCompDirective"), `) {`)
@@ -1133,7 +1136,7 @@ func (cg *generator) generateFlagCompletionFuncs(g *protogen.GeneratedFile, fs *
 	sort.Strings(orderedDeps)
 	for _, depName := range orderedDeps {
 		dep := fs.deps[depName]
-		cg.generateFlagCompletionFuncs(g, dep, append(prefix, depName)...)
+		pc.generateFlagCompletionFuncs(g, dep, append(prefix, depName)...)
 	}
 }
 
@@ -1246,7 +1249,7 @@ func formatComments(comments protogen.CommentSet) ([]string, error) {
 }
 
 // Note that the final closing brace is not written.
-func (cg *generator) generateInteractiveEdit(service *protogen.Service, method *protogen.Method, g *protogen.GeneratedFile) string {
+func (pc *pluginContext) generateInteractiveEdit(service *protogen.Service, method *protogen.Method, g *protogen.GeneratedFile) string {
 	g.P(`if cmd.Flags().Lookup("interactive").Value.String() == "true" {`)
 	// try to find a matching "getter" method. If found, use it to obtain the current
 	// value of `in` and pass it to the setter method.
@@ -1255,7 +1258,7 @@ func (cg *generator) generateInteractiveEdit(service *protogen.Service, method *
 	// rpc Get*(google.protobuf.Empty) returns (Message);
 	editVar := "in"
 	for _, candidate := range service.Methods {
-		if candidate == method || cg.shouldSkipMethod(candidate) {
+		if candidate == method || pc.shouldSkipMethod(candidate) {
 			continue
 		}
 		if string(candidate.Desc.Name()) == "Get"+strings.TrimPrefix(string(method.Desc.Name()), "Set") {
@@ -1285,7 +1288,7 @@ func (cg *generator) generateInteractiveEdit(service *protogen.Service, method *
 	return editVar
 }
 
-func (cg *generator) generateRun(service *protogen.Service, method *protogen.Method, g *protogen.GeneratedFile, writers serviceGenWriters) {
+func (pc *pluginContext) generateRun(service *protogen.Service, method *protogen.Method, g *protogen.GeneratedFile, writers serviceGenWriters) {
 	requestIsEmpty := isEmptypb(method.Desc.Input())
 	responseIsEmpty := isEmptypb(method.Desc.Output())
 	g.P(" RunE: func(cmd *", _cobra.Ident("Command"), ", args []string) error {")
@@ -1298,7 +1301,7 @@ func (cg *generator) generateRun(service *protogen.Service, method *protogen.Met
 	editVar := "in"
 	maybeInitializeEditVar := func() {}
 	if genEditInteractive {
-		editVar = cg.generateInteractiveEdit(service, method, g)
+		editVar = pc.generateInteractiveEdit(service, method, g)
 		if editVar != "in" {
 			maybeInitializeEditVar = func() {
 				g.P("if ", editVar, " == nil {")
@@ -1351,11 +1354,15 @@ func (cg *generator) generateRun(service *protogen.Service, method *protogen.Met
 	g.P(" return err")
 	g.P("}")
 
-	if !responseIsEmpty {
-		g.P(_cli.Ident("RenderOutput"), "(cmd, response)")
+	if !method.Desc.IsStreamingServer() {
+		if !responseIsEmpty {
+			g.P(_cli.Ident("RenderOutput"), "(cmd, ", responseVarName, ")")
+		}
+		g.P("return nil")
+	} else {
+		g.P("return ", _cli.Ident("RenderStreamingOutput"), "(cmd, ", responseVarName, ")")
 	}
 
-	g.P("return nil")
 	g.P("},")
 }
 
