@@ -10,8 +10,8 @@ import (
 	"slices"
 	"strings"
 
+	"buf.build/go/protoyaml"
 	"github.com/bufbuild/protovalidate-go"
-	"github.com/bufbuild/protoyaml-go"
 	"google.golang.org/protobuf/proto"
 )
 

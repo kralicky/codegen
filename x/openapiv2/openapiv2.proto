@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package openapiv2;
+
+import "google/protobuf/descriptor.proto";
+
+extend google.protobuf.FileOptions {
+  optional GeneratorOptions generator = 25700;
+}
+
+message GeneratorOptions {
+  enum Format {
+    Swagger   = 0;
+    OpenapiV3 = 1;
+  }
+  bool enabled = 1;
+  bool format  = 2;
+}
