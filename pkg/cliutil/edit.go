@@ -10,8 +10,8 @@ import (
 	"slices"
 	"strings"
 
+	"buf.build/go/protovalidate"
 	"buf.build/go/protoyaml"
-	"github.com/bufbuild/protovalidate-go"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -40,6 +40,14 @@ func EditInteractive[T proto.Message](spec T, comments ...string) (T, error) {
 
 var validator, _ = protovalidate.New()
 
+type protovalidateValidator struct {
+	protovalidate.Validator
+}
+
+func (v protovalidateValidator) Validate(msg proto.Message) error {
+	return v.Validator.Validate(msg)
+}
+
 func LoadFromFile[T proto.Message](spec T, path string) error {
 	var f *os.File
 	if path == "-" {
@@ -62,7 +70,7 @@ func LoadFromFile[T proto.Message](spec T, path string) error {
 
 	if err := (protoyaml.UnmarshalOptions{
 		Path:      path,
-		Validator: validator,
+		Validator: protovalidateValidator{validator},
 	}).Unmarshal(bytes, spec); err != nil {
 		return fmt.Errorf("error unmarshalling json: %w", err)
 	}
@@ -156,7 +164,7 @@ func tryEdit[T proto.Message](spec T, extraComments []string) (T, error) {
 	editedSpec := spec.ProtoReflect().New()
 
 	unmarshalOpts := protoyaml.UnmarshalOptions{
-		Validator: validator,
+		Validator: protovalidateValidator{validator},
 	}
 
 	if err := unmarshalOpts.Unmarshal([]byte(strings.Join(filteredLines, "\n")), editedSpec.Interface()); err != nil {
