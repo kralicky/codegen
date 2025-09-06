@@ -1153,6 +1153,28 @@ func formatKebab[T ~string](name T) string {
 	return kebabName
 }
 
+// parseDurationExtended parses a duration string with optional "w" (weeks) and "d" (days) suffixes or standard time.Duration formats.
+// If the input uses "w" or "d", it is converted to time.Duration; otherwise, it falls back to parsing via time.ParseDuration.
+// Returns the equivalent time.Duration and any error encountered during conversion.
+func parseDurationExtended(s string) (time.Duration, error) {
+	if strings.HasSuffix(s, "w") {
+		n, err := strconv.Atoi(strings.TrimSuffix(s, "w"))
+		if err != nil {
+			return 0, err
+		}
+		return time.Hour * 24 * 7 * time.Duration(n), nil
+	}
+	if strings.HasSuffix(s, "d") {
+		n, err := strconv.Atoi(strings.TrimSuffix(s, "d"))
+		if err != nil {
+			return 0, err
+		}
+		return time.Hour * 24 * time.Duration(n), nil
+	}
+	// fallback to default
+	return time.ParseDuration(s)
+}
+
 // converts a duration string (e.g. "1h", "15m", 2h30m) into the equivalent go syntax
 // string (e.g. "1*time.Hour", "15*time.Minute", "2*time.Hour+30*time.Minute")
 func unparseDuration(durationStr string) (tokens []any) {
@@ -1161,7 +1183,7 @@ func unparseDuration(durationStr string) (tokens []any) {
 		return
 	}
 
-	duration, err := time.ParseDuration(durationStr)
+	duration, err := parseDurationExtended(durationStr)
 	if err != nil {
 		panic(fmt.Sprintf("invalid duration %q: %v", durationStr, err))
 	}
