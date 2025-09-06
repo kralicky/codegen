@@ -17,7 +17,7 @@ func DurationpbValue(val *time.Duration, p **durationpb.Duration) pflag.Value {
 }
 
 func (d *durationpbValue) Set(s string) error {
-	v, err := time.ParseDuration(s)
+	v, err := ParseDuration(s)
 	*d = *(*durationpbValue)(durationpb.New(v))
 	return err
 }
