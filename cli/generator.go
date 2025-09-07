@@ -12,6 +12,7 @@ import (
 
 	"github.com/iancoleman/strcase"
 	"github.com/kralicky/codegen/pkg/extensions"
+	"github.com/kralicky/codegen/pkg/flagutil"
 	"google.golang.org/genproto/googleapis/api/annotations"
 	"google.golang.org/protobuf/compiler/protogen"
 	"google.golang.org/protobuf/proto"
@@ -1161,7 +1162,7 @@ func unparseDuration(durationStr string) (tokens []any) {
 		return
 	}
 
-	duration, err := time.ParseDuration(durationStr)
+	duration, err := flagutil.ParseDuration(durationStr)
 	if err != nil {
 		panic(fmt.Sprintf("invalid duration %q: %v", durationStr, err))
 	}
